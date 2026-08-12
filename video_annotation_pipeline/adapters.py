@@ -131,6 +131,96 @@ def prepare_lerobot_v3_video_manifest(
     return summary
 
 
+def prepare_lerobot_v2_video_manifest(
+    dataset_root: Path | str,
+    output_manifest: Path | str,
+    *,
+    dataset: str,
+    camera_key: str,
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    include_reference_caption: bool = True,
+) -> dict[str, Any]:
+    """Build source rows for LeRobot v2/v2.1 one-file-per-episode videos."""
+    root = Path(dataset_root).expanduser().resolve()
+    output = Path(output_manifest).expanduser().resolve()
+    info_path = root / "meta" / "info.json"
+    episodes_path = root / "meta" / "episodes.jsonl"
+    if not info_path.is_file() or not episodes_path.is_file():
+        raise FileNotFoundError(f"incomplete LeRobot v2 dataset under {root}")
+    info = json.loads(info_path.read_text())
+    version = str(info.get("codebase_version") or "")
+    if not version.startswith("v2"):
+        raise ValueError(f"expected LeRobot v2 metadata, found {version!r}")
+    video_path_template = str(info.get("video_path") or "")
+    if not video_path_template:
+        raise ValueError("meta/info.json is missing video_path")
+    fps = float(info.get("fps") or 0.0)
+    chunks_size = int(info.get("chunks_size") or 1000)
+    if fps <= 0 or chunks_size <= 0:
+        raise ValueError("meta/info.json must contain positive fps/chunks_size")
+    episodes = [
+        json.loads(line) for line in episodes_path.read_text().splitlines() if line.strip()
+    ]
+    eligible: list[dict[str, Any]] = []
+    skipped_duration = missing_video = 0
+    for episode in episodes:
+        episode_index = int(episode["episode_index"])
+        length = int(episode.get("length") or 0)
+        duration = round(length / fps, 3) if length > 0 else 0.0
+        if not min_duration_sec <= duration <= max_duration_sec:
+            skipped_duration += 1
+            continue
+        episode_chunk = episode_index // chunks_size
+        relative = video_path_template.format(
+            episode_chunk=episode_chunk,
+            episode_index=episode_index,
+            video_key=camera_key,
+        )
+        video_path = root / relative
+        if not video_path.is_file():
+            missing_video += 1
+            continue
+        tasks = [str(value) for value in (episode.get("tasks") or []) if value]
+        reference_caption = tasks[0] if include_reference_caption and tasks else None
+        eligible.append({
+            "dataset": dataset,
+            "clip_uid": f"{dataset}-episode-{episode_index:06d}",
+            "video_uid": f"episode-{episode_index:06d}",
+            "source_clip_path": str(video_path),
+            "duration_sec_reference": duration,
+            "camera_key": camera_key,
+            "task_hint": None,
+            "reference_caption": reference_caption,
+            "reference_policy": "held_out_from_visual_prompt",
+            "label_source": "qwen_visual_only",
+            "narration_used": False,
+        })
+    selected = eligible[offset: offset + limit if limit else None]
+    _write_jsonl(output, selected)
+    summary = {
+        "dataset": dataset,
+        "dataset_root": str(root),
+        "codebase_version": version,
+        "camera_key": camera_key,
+        "manifest": str(output),
+        "episodes": len(episodes),
+        "eligible": len(eligible),
+        "prepared": len(selected),
+        "skipped_duration": skipped_duration,
+        "missing_video": missing_video,
+        "task_hint_non_null": sum(row["task_hint"] is not None for row in selected),
+        "reference_caption_rows": sum(bool(row["reference_caption"]) for row in selected),
+        "narration_used": False,
+    }
+    output.with_suffix(".summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
+    )
+    return summary
+
+
 def prepare_ego4d_dataset(
     segments_path: Path | str,
     output_dir: Path | str,

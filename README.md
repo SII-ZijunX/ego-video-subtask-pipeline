@@ -161,6 +161,20 @@ ego-video-pipeline prepare-lerobot-v3 \
 该命令输出的 `task_hint` 始终为 `null`；数据集 `tasks` 只会写入
 `reference_caption` 供标注后对照。
 
+HABIT、RoboPro 等 LeRobot v2/v2.1 数据通常是“一条 episode 一个 MP4”，使用对应命令：
+
+```bash
+ego-video-pipeline prepare-lerobot-v2 \
+  --dataset-root /data/robopro \
+  --dataset robopro \
+  --camera-key observation.images.cam_high \
+  --output runs/robopro/sources.jsonl \
+  --limit 100 \
+  --min-duration-sec 3
+```
+
+v2 adapter 同样把 `tasks` 仅保存为 held-out `reference_caption`，不写入 `task_hint`。
+
 然后运行：
 
 ```bash
