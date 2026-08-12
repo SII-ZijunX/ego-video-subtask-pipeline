@@ -58,6 +58,65 @@ def test_generic_source_manifest_rejects_below_minimum(tmp_path, monkeypatch) ->
         raise AssertionError("expected duration validation failure")
 
 
+def test_generic_source_manifest_supports_episode_range_in_shared_container(
+    tmp_path, monkeypatch
+) -> None:
+    video = tmp_path / "shared-container.mp4"
+    video.write_bytes(b"fake")
+    manifest = tmp_path / "sources.jsonl"
+    manifest.write_text(json.dumps({
+        "dataset": "airoa-moma",
+        "clip_uid": "episode-7",
+        "source_clip_path": str(video),
+        "source_start_sec": 101.25,
+        "source_end_sec": 114.75,
+        "reference_caption": "dataset text must remain out of the prompt",
+        "task_hint": None,
+    }) + "\n")
+    monkeypatch.setattr(pilot, "ffprobe_duration", lambda _: 500.0)
+
+    rows = pilot.load_source_manifest(manifest, 3.0, 30.0)
+
+    assert rows[0]["duration_sec"] == 13.5
+    assert rows[0]["source_seek_offset_sec"] == 101.25
+    assert rows[0]["clip_video_start_sec"] == 101.25
+    assert rows[0]["clip_video_end_sec"] == 114.75
+    assert rows[0]["task_hint"] is None
+    assert rows[0]["narration_used"] is False
+
+
+def test_export_analysis_window_adds_episode_offset(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "shared.mp4"
+    source.write_bytes(b"fake")
+    commands = []
+
+    def fake_run(command):
+        commands.append(command)
+        target = Path(command[-1])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"window")
+        return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(pilot, "run", fake_run)
+    monkeypatch.setattr(pilot, "ffprobe_duration", lambda _: 8.0)
+    row = {
+        "dataset": "airoa-moma", "episode_id": "win", "clip_uid": "episode-7",
+        "video_uid": "episode-7", "source_clip_path": str(source),
+        "source_duration_sec": 13.5, "source_seek_offset_sec": 101.25,
+        "window_index": 1, "window_start_sec": 5.5, "window_end_sec": 13.5,
+        "window_duration_sec": 8.0, "overlap_sec": 2.0, "task_hint": None,
+    }
+
+    result = pilot.export_analysis_window(row, tmp_path / "run", overwrite=True)
+
+    assert result["export_ok"]
+    assert commands[0][commands[0].index("-ss") + 1] == "106.750"
+    metadata = json.loads((tmp_path / "run" / "dataset" / "win" / "metadata.json").read_text())
+    assert metadata["container_window_start_sec"] == 106.75
+    assert metadata["container_window_end_sec"] == 114.75
+    assert metadata["task_hint"] is None
+
+
 def test_annotation_candidates_map_local_to_source_time() -> None:
     sources = [{
         "clip_uid": "clip", "video_uid": "video", "source_clip_path": "/raw.mp4",

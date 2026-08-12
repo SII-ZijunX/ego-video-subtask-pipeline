@@ -176,6 +176,7 @@ def load_source_manifest(
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
     errors: list[str] = []
+    duration_cache: dict[Path, float | None] = {}
     for index, raw in enumerate(rows):
         path_value = str(raw.get("source_clip_path") or raw.get("path") or "").strip()
         if not path_value:
@@ -185,10 +186,33 @@ def load_source_manifest(
         if not source_path.is_file():
             errors.append(f"row {index}: file not found: {source_path}")
             continue
-        duration = ffprobe_duration(source_path)
-        if duration is None or duration <= 0:
+        if source_path not in duration_cache:
+            duration_cache[source_path] = ffprobe_duration(source_path)
+        container_duration = duration_cache[source_path]
+        if container_duration is None or container_duration <= 0:
             errors.append(f"row {index}: ffprobe failed: {source_path}")
             continue
+        try:
+            source_start = float(raw.get("source_start_sec") or 0.0)
+            source_end_value = raw.get("source_end_sec")
+            source_end = (
+                float(source_end_value) if source_end_value is not None else container_duration
+            )
+        except (TypeError, ValueError):
+            errors.append(f"row {index}: invalid source_start_sec/source_end_sec")
+            continue
+        if source_start < 0 or source_end <= source_start:
+            errors.append(
+                f"row {index}: invalid source range [{source_start}, {source_end}]"
+            )
+            continue
+        if source_end > container_duration + 0.5:
+            errors.append(
+                f"row {index}: source_end_sec {source_end}s exceeds container "
+                f"duration {container_duration}s"
+            )
+            continue
+        duration = round(source_end - source_start, 3)
         if not min_duration_sec <= duration <= max_duration_sec:
             errors.append(
                 f"row {index}: duration {duration}s outside "
@@ -213,8 +237,10 @@ def load_source_manifest(
             "video_uid": str(raw.get("video_uid") or clip_uid),
             "source_clip_path": str(source_path),
             "duration_sec": duration,
-            "clip_video_start_sec": 0.0,
-            "clip_video_end_sec": duration,
+            "clip_video_start_sec": source_start,
+            "clip_video_end_sec": source_end,
+            "source_seek_offset_sec": source_start,
+            "source_container_duration_sec": container_duration,
             "scenario": scenario,
             "scenarios": list(raw.get("scenarios") or ([scenario] if scenario else [])),
             "label_source": "qwen_visual_only",
@@ -235,9 +261,12 @@ def export_analysis_window(
     target.parent.mkdir(parents=True, exist_ok=True)
     result = {**row, "analysis_clip_path": str(target.resolve()), "export_ok": False, "error": None}
     if overwrite or not target.is_file():
+        seek_time = float(row.get("source_seek_offset_sec") or 0.0) + float(
+            row["window_start_sec"]
+        )
         command = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-ss", f"{float(row['window_start_sec']):.3f}",
+            "-ss", f"{seek_time:.3f}",
             "-i", str(row["source_clip_path"]),
             "-t", f"{float(row['window_duration_sec']):.3f}",
             "-map", "0:v:0", "-an", "-vf", "scale=960:-2",
@@ -275,6 +304,15 @@ def export_analysis_window(
         "source_duration_sec": row["source_duration_sec"],
         "source_window_start_sec": row["window_start_sec"],
         "source_window_end_sec": row["window_end_sec"],
+        "source_seek_offset_sec": row.get("source_seek_offset_sec", 0.0),
+        "container_window_start_sec": round(
+            float(row.get("source_seek_offset_sec") or 0.0)
+            + float(row["window_start_sec"]), 3
+        ),
+        "container_window_end_sec": round(
+            float(row.get("source_seek_offset_sec") or 0.0)
+            + float(row["window_end_sec"]), 3
+        ),
         "analysis_window_index": row["window_index"],
         "analysis_window_overlap_sec": row["overlap_sec"],
         "label_source": "qwen_visual_only",
@@ -317,6 +355,7 @@ def prepare(args: argparse.Namespace) -> None:
                 "task_hint": source.get("task_hint"),
                 "source_clip_path": source["source_clip_path"],
                 "source_duration_sec": source["duration_sec"],
+                "source_seek_offset_sec": source.get("source_seek_offset_sec", 0.0),
                 "window_index": index,
                 "window_start_sec": start,
                 "window_end_sec": end,
@@ -618,6 +657,7 @@ def stitch_timeline(
             "clip_uid": source["clip_uid"],
             "video_uid": source.get("video_uid"),
             "source_clip_path": source["source_clip_path"],
+            "source_seek_offset_sec": source.get("source_seek_offset_sec", 0.0),
             "segment_id": segment_id,
             "duration_sec": duration_sec,
             "uncovered_duration_sec": round(float(row.get("uncovered_duration_sec", duration_sec if "uncovered_by_qwen" in flags else 0.0)), 3),
@@ -634,9 +674,12 @@ def export_final_segment(row: dict[str, Any], pilot_dir: Path, overwrite: bool) 
     target.parent.mkdir(parents=True, exist_ok=True)
     result = {**row, "segment_clip_path": str(target.resolve()), "export_ok": False, "export_error": None}
     if overwrite or not target.is_file():
+        seek_time = float(row.get("source_seek_offset_sec") or 0.0) + float(
+            row["start_sec"]
+        )
         completed = run([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-ss", f"{float(row['start_sec']):.3f}", "-i", str(row["source_clip_path"]),
+            "-ss", f"{seek_time:.3f}", "-i", str(row["source_clip_path"]),
             "-t", f"{float(row['duration_sec']):.3f}", "-map", "0:v:0", "-an",
             "-vf", "scale=960:-2", "-c:v", "libx264", "-preset", "veryfast",
             "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(target),
@@ -891,7 +934,10 @@ def build_parser() -> argparse.ArgumentParser:
     source_group = prepare_parser.add_mutually_exclusive_group()
     source_group.add_argument(
         "--source-manifest",
-        help="generic JSONL manifest with source_clip_path and optional dataset/clip_uid/task_hint",
+        help=(
+            "generic JSONL manifest with source_clip_path and optional "
+            "source_start_sec/source_end_sec, dataset, clip_uid, or task_hint"
+        ),
     )
     source_group.add_argument(
         "--ego4d-root", default=DEFAULT_EGO4D_ROOT,

@@ -133,6 +133,18 @@ ActionNet、RoboMIND、HoloAssist、Sekai 等直接提供 MP4 的数据集可以
 {"dataset":"actionnet","clip_uid":"01JJ...","source_clip_path":"/data/01JJ.../top/rgb.mp4","task_hint":"optional reference only"}
 ```
 
+LeRobot v3 等数据集可能把许多 episodes 拼进同一个长 MP4。此时不要把整个容器当作一条
+episode；在 manifest 中提供容器内的秒级范围。管线会在分析窗口和最终片段导出时自动加上
+该偏移，不需要复制大文件：
+
+```json
+{"dataset":"airoa-moma","clip_uid":"episode-000007","source_clip_path":"/data/videos/head/file-000.mp4","source_start_sec":101.25,"source_end_sec":114.75,"reference_caption":"旁路对照文本","task_hint":null}
+```
+
+`reference_caption` 可保留用于事后评估；只要 `task_hint` 为 `null`，它不会进入视觉标注
+prompt。`source_start_sec/source_end_sec` 必须落在 MP4 容器时长内，episode 时长仍必须满足
+`--min-duration-sec/--max-duration-sec`。
+
 然后运行：
 
 ```bash
