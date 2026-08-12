@@ -1,0 +1,43 @@
+project:
+  schema_version: "0.1"
+  output_dir: outputs/mock
+
+backend:
+  type: mock
+  model: mock-v0.1
+  model_path: null
+  base_url: null
+  api_key_env: VLM_API_KEY
+  timeout_sec: 300
+  max_retries: 0
+  temperature: 0.0
+  max_new_tokens: 1024
+  attn_implementation: null
+
+sampling:
+  fps: 2.0
+  max_frames: 128
+  resize_long_side: 448
+  multi_view_layout: grid
+
+segmentation:
+  min_subtask_duration_sec: 3.0
+  max_subtasks_per_minute: 30
+  sustained_pause_sec: 1.5
+
+validation:
+  continuity_tolerance_sec: 0.2
+  max_uncovered_gap_sec: 1.0
+  max_multiview_duration_diff_sec: 0.5
+  minimum_video_duration_sec: 3.0
+  reject_idle_only: true
+  warn_other_ratio: 0.3
+  minimum_coverage_ratio: 0.7
+
+output:
+  save_raw_response: true
+  save_sampled_frames: true
+  save_prompt: true
+  generate_html: true
+
+prompt_version: ego_video_v0.1_mock

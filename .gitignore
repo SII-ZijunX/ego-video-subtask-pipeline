@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.orig
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local credentials and machine-specific model paths
+.env
+configs/*.local.yaml
+
+# Generated videos, model weights, annotations, and review artifacts
+outputs/
+runs/
+examples/_demo/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.pt
+*.pth
+*.safetensors
+*.log

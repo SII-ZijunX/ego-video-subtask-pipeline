@@ -1,0 +1,13 @@
+{
+  "episode_id": "example_episode",
+  "source": "synthetic_demo",
+  "task_hint": "Move the visible object.",
+  "cameras": [
+    {
+      "name": "main",
+      "role": "main",
+      "path": "video.mp4",
+      "time_offset_sec": 0.0
+    }
+  ]
+}

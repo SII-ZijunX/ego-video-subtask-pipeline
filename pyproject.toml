@@ -1,0 +1,59 @@
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ego-video-subtask-pipeline"
+version = "0.1.0"
+description = "Auditable long-form egocentric video segmentation and visual-language labeling"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "pydantic>=2.8,<3",
+    "PyYAML>=6.0",
+    "typer>=0.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/SII-ZijunX/ego-video-subtask-pipeline"
+Repository = "https://github.com/SII-ZijunX/ego-video-subtask-pipeline.git"
+Issues = "https://github.com/SII-ZijunX/ego-video-subtask-pipeline/issues"
+
+[project.optional-dependencies]
+qwen = [
+    "accelerate>=0.34",
+    "qwen-vl-utils>=0.0.10",
+    "torch>=2.3",
+    "transformers>=4.51",
+]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+ego-video-pipeline = "video_annotation_pipeline.__main__:run"
+ego-video-long = "video_annotation_pipeline.long_video:main"
+
+[tool.setuptools.packages.find]
+include = ["video_annotation_pipeline*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
