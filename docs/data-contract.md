@@ -44,7 +44,7 @@
 
 ```json
 {
-  "segment_id": "ego4d__clip_001__seg0007",
+  "segment_id": "ego4d_v2__clip_001__seg0007",
   "clip_uid": "clip_001",
   "start_sec": 83.2,
   "end_sec": 89.7,

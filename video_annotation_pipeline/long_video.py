@@ -599,8 +599,9 @@ def stitch_timeline(
             atomic.append(row)
     final: list[dict[str, Any]] = []
     atomic = enforce_min_segment_duration(atomic, min_segment_sec)
+    dataset = safe_identifier(str(source.get("dataset") or "generic_mp4"))
     for index, row in enumerate(atomic):
-        segment_id = f"ego4d__{source['clip_uid']}__seg{index:04d}"
+        segment_id = f"{dataset}__{source['clip_uid']}__seg{index:04d}"
         duration_sec = round(float(row["end_sec"]) - float(row["start_sec"]), 3)
         flags = list(row["quality_flags"])
         training_eligible = bool(row["training_eligible"])
@@ -613,7 +614,7 @@ def stitch_timeline(
             flags.append("non_training_action")
         final.append({
             **row,
-            "dataset": "ego4d_v2",
+            "dataset": dataset,
             "clip_uid": source["clip_uid"],
             "video_uid": source.get("video_uid"),
             "source_clip_path": source["source_clip_path"],

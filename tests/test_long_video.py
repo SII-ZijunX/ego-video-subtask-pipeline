@@ -88,7 +88,7 @@ def test_annotation_candidates_map_local_to_source_time() -> None:
 
 def test_stitch_merges_same_semantics_across_overlap() -> None:
     source = {
-        "clip_uid": "clip", "video_uid": "video", "source_clip_path": "/raw.mp4",
+        "dataset": "actionnet", "clip_uid": "clip", "video_uid": "video", "source_clip_path": "/raw.mp4",
         "duration_sec": 20.0,
     }
     base = {
@@ -109,6 +109,8 @@ def test_stitch_merges_same_semantics_across_overlap() -> None:
         (0.0, 12.0, "move"), (12.0, 20.0, "open"),
     ]
     assert timeline[0]["candidate_ids"] == ["a", "b"]
+    assert timeline[0]["dataset"] == "actionnet"
+    assert timeline[0]["segment_id"] == "actionnet__clip__seg0000"
 
 
 def test_stitch_is_complete_and_non_overlapping_with_gap() -> None:
