@@ -76,6 +76,12 @@ def stable_score(seed: int, clip_uid: str) -> str:
     return hashlib.sha1(f"{seed}:{clip_uid}".encode()).hexdigest()
 
 
+def safe_identifier(value: str) -> str:
+    """Return a stable filesystem/episode-safe identifier."""
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-.")
+    return cleaned or hashlib.sha1(value.encode()).hexdigest()[:16]
+
+
 def analysis_windows(duration_sec: float, window_sec: float, overlap_sec: float) -> list[tuple[float, float]]:
     """Return deterministic windows that cover [0, duration] without gaps."""
     if duration_sec <= 0:
@@ -158,6 +164,67 @@ def select_source_videos(
     )
 
 
+def load_source_manifest(
+    manifest_path: Path,
+    min_duration_sec: float,
+    max_duration_sec: float,
+) -> list[dict[str, Any]]:
+    """Load generic MP4 sources using the long-video output contract."""
+    rows = read_jsonl(manifest_path)
+    if not rows:
+        raise ValueError(f"source manifest is empty: {manifest_path}")
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    errors: list[str] = []
+    for index, raw in enumerate(rows):
+        path_value = str(raw.get("source_clip_path") or raw.get("path") or "").strip()
+        if not path_value:
+            errors.append(f"row {index}: missing source_clip_path")
+            continue
+        source_path = Path(path_value).expanduser().resolve()
+        if not source_path.is_file():
+            errors.append(f"row {index}: file not found: {source_path}")
+            continue
+        duration = ffprobe_duration(source_path)
+        if duration is None or duration <= 0:
+            errors.append(f"row {index}: ffprobe failed: {source_path}")
+            continue
+        if not min_duration_sec <= duration <= max_duration_sec:
+            errors.append(
+                f"row {index}: duration {duration}s outside "
+                f"[{min_duration_sec}, {max_duration_sec}]"
+            )
+            continue
+        dataset = safe_identifier(str(raw.get("dataset") or "generic_mp4"))
+        supplied_uid = str(raw.get("clip_uid") or "").strip()
+        clip_uid = safe_identifier(
+            supplied_uid
+            or f"{dataset}-{source_path.stem}-{hashlib.sha1(str(source_path).encode()).hexdigest()[:8]}"
+        )
+        if clip_uid in seen:
+            errors.append(f"row {index}: duplicate clip_uid: {clip_uid}")
+            continue
+        seen.add(clip_uid)
+        scenario = str(raw.get("scenario") or raw.get("task_hint") or "unknown")
+        selected.append({
+            **raw,
+            "dataset": dataset,
+            "clip_uid": clip_uid,
+            "video_uid": str(raw.get("video_uid") or clip_uid),
+            "source_clip_path": str(source_path),
+            "duration_sec": duration,
+            "clip_video_start_sec": 0.0,
+            "clip_video_end_sec": duration,
+            "scenario": scenario,
+            "scenarios": list(raw.get("scenarios") or ([scenario] if scenario else [])),
+            "label_source": "qwen_visual_only",
+            "narration_used": False,
+        })
+    if errors:
+        raise ValueError("invalid source manifest:\n" + "\n".join(errors))
+    return selected
+
+
 def export_analysis_window(
     row: dict[str, Any], pilot_dir: Path, overwrite: bool
 ) -> dict[str, Any]:
@@ -195,8 +262,9 @@ def export_analysis_window(
     episode_dir.mkdir(parents=True, exist_ok=True)
     episode_metadata = {
         "episode_id": episode_id,
-        "source": "ego4d_v2_long_window",
-        "task_hint": None,
+        "source": f"{row.get('dataset', 'generic_mp4')}_long_window",
+        "dataset": row.get("dataset", "generic_mp4"),
+        "task_hint": row.get("task_hint"),
         "cameras": [{
             "name": "main", "role": "main", "path": str(target.resolve()),
             "time_offset_sec": 0.0,
@@ -217,24 +285,36 @@ def export_analysis_window(
 
 
 def prepare(args: argparse.Namespace) -> None:
-    if not args.ego4d_root:
-        raise ValueError("set --ego4d-root or the EGO4D_ROOT environment variable")
     pilot_dir = Path(args.output_dir).resolve()
     pilot_dir.mkdir(parents=True, exist_ok=True)
-    source_rows = select_source_videos(
-        Path(args.ego4d_root), args.num_videos, args.min_duration_sec,
-        args.max_duration_sec, args.seed,
-    )
+    if args.source_manifest:
+        source_rows = load_source_manifest(
+            Path(args.source_manifest).resolve(), args.min_duration_sec, args.max_duration_sec
+        )
+        if args.num_videos is not None:
+            source_rows = source_rows[:args.num_videos]
+    else:
+        if not args.ego4d_root:
+            raise ValueError(
+                "set --source-manifest, --ego4d-root, or the EGO4D_ROOT environment variable"
+            )
+        source_rows = select_source_videos(
+            Path(args.ego4d_root), args.num_videos or 10, args.min_duration_sec,
+            args.max_duration_sec, args.seed,
+        )
     windows: list[dict[str, Any]] = []
     for source in source_rows:
         for index, (start, end) in enumerate(analysis_windows(
             float(source["duration_sec"]), args.window_sec, args.overlap_sec
         )):
-            episode_id = f"ego4d_long__{source['clip_uid']}__win{index:04d}"
+            dataset = safe_identifier(str(source.get("dataset") or "generic_mp4"))
+            episode_id = f"{dataset}_long__{source['clip_uid']}__win{index:04d}"
             windows.append({
                 "episode_id": episode_id,
                 "clip_uid": source["clip_uid"],
                 "video_uid": source["video_uid"],
+                "dataset": source.get("dataset", "generic_mp4"),
+                "task_hint": source.get("task_hint"),
                 "source_clip_path": source["source_clip_path"],
                 "source_duration_sec": source["duration_sec"],
                 "window_index": index,
@@ -254,7 +334,8 @@ def prepare(args: argparse.Namespace) -> None:
     (pilot_dir / "clip_uids.txt").write_text("\n".join(row["clip_uid"] for row in source_rows) + "\n")
     failed = [row for row in exported if not row.get("export_ok")]
     manifest = {
-        "workflow": "ego4d_long_video_subtask_v1",
+        "workflow": "long_video_subtask_v1",
+        "datasets": sorted({str(row.get("dataset") or "generic_mp4") for row in source_rows}),
         "label_source": "qwen_visual_only",
         "narration_used": False,
         "num_videos": len(source_rows),
@@ -688,9 +769,9 @@ def build_review_html(
             f"<section><h2>{html.escape(clip_uid)} · {len(cards)} subtasks</h2>"
             f"<p class='label'><b>Long-video caption:</b> {html.escape(long_caption)}</p>{''.join(cards)}</section>"
         )
-    page = f"""<!doctype html><html><head><meta charset="utf-8"><title>Ego4D long-video subtasks</title>
+    page = f"""<!doctype html><html><head><meta charset="utf-8"><title>Long-video subtasks</title>
 <style>body{{font-family:system-ui;margin:24px;background:#f5f6f8}}section{{margin:30px 0}}article{{background:white;padding:14px;margin:12px 0;border-left:6px solid #d99;border-radius:7px}}article.accept{{border-color:#49a66f}}video{{width:min(640px,100%);background:#111}}.label{{font-size:1.1rem}}pre{{white-space:pre-wrap}}</style></head><body>
-<h1>Ego4D long-video → short subtasks</h1>
+<h1>Long-video → short subtasks</h1>
 <p>Labels and boundaries are Qwen visual predictions. Narration was not used. Videos load only after click.</p>
 <details><summary>summary</summary><pre>{html.escape(json.dumps(summary, indent=2, ensure_ascii=False))}</pre></details>
 {''.join(sections)}</body></html>"""
@@ -752,7 +833,8 @@ def finalize(args: argparse.Namespace) -> None:
     for row in exported:
         action_duration[str(row["action"])] += float(row["duration_sec"])
     summary = {
-        "workflow": "ego4d_long_video_subtask_v1",
+        "workflow": "long_video_subtask_v1",
+        "datasets": sorted({str(row.get("dataset") or "generic_mp4") for row in sources}),
         "label_source": "qwen_visual_only",
         "narration_used": False,
         "source_videos": len(sources),
@@ -805,14 +887,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     prepare_parser = sub.add_parser("prepare", help="select sources and export analysis windows")
-    prepare_parser.add_argument(
+    source_group = prepare_parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "--source-manifest",
+        help="generic JSONL manifest with source_clip_path and optional dataset/clip_uid/task_hint",
+    )
+    source_group.add_argument(
         "--ego4d-root", default=DEFAULT_EGO4D_ROOT,
         help="Ego4D root containing ego4d.json and v2/clips (or set EGO4D_ROOT)",
     )
     prepare_parser.add_argument("--output-dir", required=True)
-    prepare_parser.add_argument("--num-videos", type=int, default=10)
-    prepare_parser.add_argument("--min-duration-sec", type=float, default=300.0)
-    prepare_parser.add_argument("--max-duration-sec", type=float, default=490.0)
+    prepare_parser.add_argument("--num-videos", type=int, default=None)
+    prepare_parser.add_argument("--min-duration-sec", type=float, default=3.0)
+    prepare_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
     prepare_parser.add_argument("--window-sec", type=float, default=30.0)
     prepare_parser.add_argument("--overlap-sec", type=float, default=5.0)
     prepare_parser.add_argument("--seed", type=int, default=42)

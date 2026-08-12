@@ -123,6 +123,32 @@ python -m http.server 8000 --directory runs/ego4d_batch_001
 `idle/other/uncovered` 是否应该重切，以及长视频 caption 是否符合动作顺序。详见
 [质量门禁](docs/quality-gates.md)。
 
+## Generic MP4 datasets
+
+ActionNet、RoboMIND、HoloAssist、Sekai 等直接提供 MP4 的数据集可以复用同一条长视频管线。
+先准备 JSONL manifest，每行至少包含 `source_clip_path`，并建议提供 `dataset`、`clip_uid`、
+`video_uid`、`scenario` 或 `task_hint`：
+
+```json
+{"dataset":"actionnet","clip_uid":"01JJ...","source_clip_path":"/data/01JJ.../top/rgb.mp4","task_hint":"optional reference only"}
+```
+
+然后运行：
+
+```bash
+ego-video-long prepare \
+  --source-manifest runs/mixed/sources.jsonl \
+  --output-dir runs/mixed \
+  --min-duration-sec 3 \
+  --max-duration-sec 3600 \
+  --window-sec 30 \
+  --overlap-sec 5
+```
+
+后续 `annotate-batch`、`finalize`、≥3 秒硬门禁、long-video caption 和审查页面与 Ego4D
+完全一致。MCAP、仅图片、archive-only 或远程 manifest 数据集仍需先转换/解析为本地 MP4，不能仅凭
+目录存在假定兼容。
+
 ## Main outputs
 
 | File | Meaning |

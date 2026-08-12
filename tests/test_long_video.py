@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +24,38 @@ def test_analysis_windows_cover_full_video() -> None:
 
 def test_short_video_is_one_analysis_window() -> None:
     assert pilot.analysis_windows(12.5, 30.0, 5.0) == [(0.0, 12.5)]
+
+
+def test_generic_source_manifest_uses_probed_duration(tmp_path, monkeypatch) -> None:
+    video = tmp_path / "source video.mp4"
+    video.write_bytes(b"fake")
+    manifest = tmp_path / "sources.jsonl"
+    manifest.write_text(json.dumps({
+        "dataset": "robot/actionnet",
+        "clip_uid": "episode 1",
+        "source_clip_path": str(video),
+        "task_hint": "pick up a cup",
+    }) + "\n")
+    monkeypatch.setattr(pilot, "ffprobe_duration", lambda _: 12.5)
+    rows = pilot.load_source_manifest(manifest, 3.0, 30.0)
+    assert rows[0]["dataset"] == "robot-actionnet"
+    assert rows[0]["clip_uid"] == "episode-1"
+    assert rows[0]["duration_sec"] == 12.5
+    assert rows[0]["narration_used"] is False
+
+
+def test_generic_source_manifest_rejects_below_minimum(tmp_path, monkeypatch) -> None:
+    video = tmp_path / "short.mp4"
+    video.write_bytes(b"fake")
+    manifest = tmp_path / "sources.jsonl"
+    manifest.write_text(json.dumps({"source_clip_path": str(video)}) + "\n")
+    monkeypatch.setattr(pilot, "ffprobe_duration", lambda _: 2.9)
+    try:
+        pilot.load_source_manifest(manifest, 3.0, 30.0)
+    except ValueError as error:
+        assert "outside [3.0, 30.0]" in str(error)
+    else:
+        raise AssertionError("expected duration validation failure")
 
 
 def test_annotation_candidates_map_local_to_source_time() -> None:
