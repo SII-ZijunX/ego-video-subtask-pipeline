@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .adapters import prepare_ego4d_dataset
+from .adapters import prepare_ego4d_dataset, prepare_lerobot_v3_video_manifest
 from .batch import annotate_batch, discover_episodes, read_jsonl
 from .config import load_config
 from .finalize import finalize_annotations
@@ -122,6 +122,25 @@ def prepare_ego4d_command(
 ) -> dict:
     return prepare_ego4d_dataset(
         segments, output, offset, limit, use_reference_as_task_hint
+    )
+
+
+def prepare_lerobot_v3_command(
+    dataset_root: Path,
+    output: Path,
+    dataset: str,
+    camera_key: str,
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    include_reference_caption: bool = True,
+) -> dict:
+    return prepare_lerobot_v3_video_manifest(
+        dataset_root, output, dataset=dataset, camera_key=camera_key,
+        offset=offset, limit=limit, min_duration_sec=min_duration_sec,
+        max_duration_sec=max_duration_sec,
+        include_reference_caption=include_reference_caption,
     )
 
 

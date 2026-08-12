@@ -145,6 +145,22 @@ episode；在 manifest 中提供容器内的秒级范围。管线会在分析窗
 prompt。`source_start_sec/source_end_sec` 必须落在 MP4 容器时长内，episode 时长仍必须满足
 `--min-duration-sec/--max-duration-sec`。
 
+安装 `pip install -e ".[lerobot]"` 后，也可以直接从标准 LeRobot v3 的
+`meta/episodes/**/*.parquet` 生成这种 manifest：
+
+```bash
+ego-video-pipeline prepare-lerobot-v3 \
+  --dataset-root /data/airoa-moma \
+  --dataset airoa-moma \
+  --camera-key observation.image.head \
+  --output runs/airoa/sources.jsonl \
+  --limit 100 \
+  --min-duration-sec 3
+```
+
+该命令输出的 `task_hint` 始终为 `null`；数据集 `tasks` 只会写入
+`reference_caption` 供标注后对照。
+
 然后运行：
 
 ```bash

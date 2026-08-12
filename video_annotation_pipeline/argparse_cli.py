@@ -17,6 +17,7 @@ from .commands import (
     evaluate_references_command,
     finalize_command,
     prepare_ego4d_command,
+    prepare_lerobot_v3_command,
     stats_command,
     validate_command,
     visualize_command,
@@ -54,6 +55,16 @@ def run() -> None:
     prepare_parser.add_argument("--offset", type=int, default=0)
     prepare_parser.add_argument("--limit", type=int, default=0)
     prepare_parser.add_argument("--use-reference-as-task-hint", action="store_true")
+    lerobot_parser = subparsers.add_parser("prepare-lerobot-v3")
+    lerobot_parser.add_argument("--dataset-root", required=True, type=Path)
+    lerobot_parser.add_argument("--output", required=True, type=Path)
+    lerobot_parser.add_argument("--dataset", required=True)
+    lerobot_parser.add_argument("--camera-key", required=True)
+    lerobot_parser.add_argument("--offset", type=int, default=0)
+    lerobot_parser.add_argument("--limit", type=int, default=0)
+    lerobot_parser.add_argument("--min-duration-sec", type=float, default=3.0)
+    lerobot_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
+    lerobot_parser.add_argument("--no-reference-caption", action="store_true")
     finalize_parser = subparsers.add_parser("finalize")
     finalize_parser.add_argument("--annotations", required=True, type=Path)
     finalize_parser.add_argument("--validation", required=True, type=Path)
@@ -81,6 +92,12 @@ def run() -> None:
     elif args.command == "prepare-ego4d":
         result = prepare_ego4d_command(
             args.segments, args.output, args.offset, args.limit, args.use_reference_as_task_hint
+        )
+    elif args.command == "prepare-lerobot-v3":
+        result = prepare_lerobot_v3_command(
+            args.dataset_root, args.output, args.dataset, args.camera_key,
+            args.offset, args.limit, args.min_duration_sec, args.max_duration_sec,
+            not args.no_reference_caption,
         )
     elif args.command == "finalize":
         result = finalize_command(
