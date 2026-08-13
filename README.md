@@ -183,13 +183,15 @@ ego-video-pipeline prepare-droid \
   --dataset-root /data/droid-raw \
   --dataset droid-raw \
   --camera wrist \
+  --outcome success \
   --output runs/droid/sources.jsonl \
   --limit 100 \
   --min-duration-sec 3
 ```
 
-adapter 会用 `ffprobe` 检查实际视频时长，缺失/损坏或低于 3 秒的 trajectory 不会进入
-manifest；`current_task` 不会写入 `task_hint`。
+adapter 默认只选 `success=true` 的轨迹，并用 `ffprobe` 检查实际视频时长；缺失/损坏或低于
+3 秒的 trajectory 不会进入 manifest。只有显式使用 `--outcome all` 或 `failure` 才会纳入失败
+轨迹；`current_task` 不会写入 `task_hint`。
 
 然后运行：
 

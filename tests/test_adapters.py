@@ -90,6 +90,7 @@ def test_prepare_droid_manifest_keeps_task_out_of_prompt(
     (episode / "metadata_example.json").write_text(json.dumps({
         "uuid": "AUTOLab+user+2023-10-21-19h-37m-47s",
         "current_task": "Put the brick in the drawer.",
+        "success": True,
         "wrist_cam_serial": "18026681",
         "ext1_cam_serial": "22008760",
         "ext2_cam_serial": "24400334",
@@ -124,7 +125,7 @@ def test_prepare_droid_manifest_enforces_duration_and_camera(
     videos = episode / "recordings" / "MP4"
     videos.mkdir(parents=True)
     (episode / "metadata_example.json").write_text(json.dumps({
-        "uuid": "example", "ext1_cam_serial": "external",
+        "uuid": "example", "success": True, "ext1_cam_serial": "external",
     }))
     external = videos / "external.mp4"
     external.write_bytes(b"video")
@@ -139,3 +140,30 @@ def test_prepare_droid_manifest_enforces_duration_and_camera(
     assert summary["prepared"] == 0
     assert summary["skipped_duration"] == 1
     assert output.read_text() == ""
+
+
+def test_prepare_droid_manifest_defaults_to_success_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "droid"
+    for name, success in (("failure", False), ("success", True)):
+        episode = root / "lab" / name / "day" / "episode"
+        videos = episode / "recordings" / "MP4"
+        videos.mkdir(parents=True)
+        (episode / f"metadata_{name}.json").write_text(json.dumps({
+            "uuid": name, "success": success, "wrist_cam_serial": "wrist",
+        }))
+        (videos / "wrist.mp4").write_bytes(b"video")
+    monkeypatch.setattr(
+        "video_annotation_pipeline.adapters._probe_video_duration",
+        lambda path: 4.0,
+    )
+    output = tmp_path / "sources.jsonl"
+
+    summary = prepare_droid_video_manifest(root, output)
+
+    row = json.loads(output.read_text())
+    assert summary["outcome"] == "success"
+    assert summary["skipped_outcome"] == 1
+    assert summary["prepared"] == 1
+    assert row["video_uid"] == "success"

@@ -173,6 +173,7 @@ def prepare_droid_command(
     output: Path,
     dataset: str = "droid-raw",
     camera: str = "wrist",
+    outcome: str = "success",
     offset: int = 0,
     limit: int = 0,
     min_duration_sec: float = 3.0,
@@ -180,7 +181,7 @@ def prepare_droid_command(
     include_reference_caption: bool = True,
 ) -> dict:
     return prepare_droid_video_manifest(
-        dataset_root, output, dataset=dataset, camera=camera,
+        dataset_root, output, dataset=dataset, camera=camera, outcome=outcome,
         offset=offset, limit=limit, min_duration_sec=min_duration_sec,
         max_duration_sec=max_duration_sec,
         include_reference_caption=include_reference_caption,

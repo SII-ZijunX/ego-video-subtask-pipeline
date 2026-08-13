@@ -47,6 +47,7 @@ def prepare_droid_video_manifest(
     *,
     dataset: str = "droid-raw",
     camera: str = "wrist",
+    outcome: str = "success",
     offset: int = 0,
     limit: int = 0,
     min_duration_sec: float = 3.0,
@@ -66,6 +67,8 @@ def prepare_droid_video_manifest(
     }.get(camera)
     if camera_serial_key is None:
         raise ValueError("camera must be one of: wrist, ext1, ext2")
+    if outcome not in {"success", "failure", "all"}:
+        raise ValueError("outcome must be one of: success, failure, all")
     if offset < 0 or limit < 0:
         raise ValueError("offset and limit must be non-negative")
     if min_duration_sec < 0 or max_duration_sec < min_duration_sec:
@@ -77,7 +80,8 @@ def prepare_droid_video_manifest(
         raise FileNotFoundError(f"DROID dataset root does not exist: {root}")
 
     rows: list[dict[str, Any]] = []
-    scanned = eligible_seen = skipped_duration = missing_video = invalid_metadata = 0
+    scanned = eligible_seen = skipped_outcome = skipped_duration = missing_video = 0
+    invalid_metadata = 0
     probe_failures = 0
     stop = offset + limit if limit else None
     for metadata_path in _iter_droid_metadata(root):
@@ -86,6 +90,10 @@ def prepare_droid_video_manifest(
             metadata = json.loads(metadata_path.read_text())
         except (OSError, json.JSONDecodeError):
             invalid_metadata += 1
+            continue
+        success = metadata.get("success")
+        if outcome != "all" and success is not (outcome == "success"):
+            skipped_outcome += 1
             continue
         serial = str(metadata.get(camera_serial_key) or "").strip()
         video_path = metadata_path.parent / "recordings" / "MP4" / f"{serial}.mp4"
@@ -137,10 +145,12 @@ def prepare_droid_video_manifest(
         "dataset": dataset,
         "dataset_root": str(root),
         "camera": camera,
+        "outcome": outcome,
         "manifest": str(output),
         "metadata_scanned": scanned,
         "eligible_seen": eligible_seen,
         "prepared": len(rows),
+        "skipped_outcome": skipped_outcome,
         "skipped_duration": skipped_duration,
         "missing_video": missing_video,
         "invalid_metadata": invalid_metadata,

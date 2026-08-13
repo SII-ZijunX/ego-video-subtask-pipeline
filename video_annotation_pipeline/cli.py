@@ -136,6 +136,7 @@ def prepare_droid_cli(
     output: Path = typer.Option(..., "--output"),
     dataset: str = typer.Option("droid-raw", "--dataset"),
     camera: str = typer.Option("wrist", "--camera"),
+    outcome: str = typer.Option("success", "--outcome"),
     offset: int = typer.Option(0, "--offset", min=0),
     limit: int = typer.Option(0, "--limit", min=0),
     min_duration_sec: float = typer.Option(3.0, "--min-duration-sec", min=0),
@@ -145,7 +146,7 @@ def prepare_droid_cli(
     ),
 ) -> None:
     typer.echo(json.dumps(prepare_droid_command(
-        dataset_root, output, dataset, camera, offset, limit,
+        dataset_root, output, dataset, camera, outcome, offset, limit,
         min_duration_sec, max_duration_sec, include_reference_caption,
     ), ensure_ascii=False, indent=2))
 

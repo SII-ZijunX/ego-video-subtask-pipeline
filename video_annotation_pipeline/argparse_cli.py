@@ -82,6 +82,7 @@ def run() -> None:
     droid_parser.add_argument("--output", required=True, type=Path)
     droid_parser.add_argument("--dataset", default="droid-raw")
     droid_parser.add_argument("--camera", choices=["wrist", "ext1", "ext2"], default="wrist")
+    droid_parser.add_argument("--outcome", choices=["success", "failure", "all"], default="success")
     droid_parser.add_argument("--offset", type=int, default=0)
     droid_parser.add_argument("--limit", type=int, default=0)
     droid_parser.add_argument("--min-duration-sec", type=float, default=3.0)
@@ -129,7 +130,7 @@ def run() -> None:
         )
     elif args.command == "prepare-droid":
         result = prepare_droid_command(
-            args.dataset_root, args.output, args.dataset, args.camera,
+            args.dataset_root, args.output, args.dataset, args.camera, args.outcome,
             args.offset, args.limit, args.min_duration_sec, args.max_duration_sec,
             not args.no_reference_caption,
         )
