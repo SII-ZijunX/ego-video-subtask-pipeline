@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from video_annotation_pipeline.adapters import (
+    prepare_droid_video_manifest,
     prepare_lerobot_v2_video_manifest,
     prepare_lerobot_v3_video_manifest,
 )
@@ -77,3 +78,64 @@ def test_prepare_lerobot_v2_manifest_keeps_tasks_out_of_prompt(tmp_path: Path) -
     assert row["reference_caption"] == "Reposition the bottle."
     assert row["reference_policy"] == "held_out_from_visual_prompt"
     assert row["narration_used"] is False
+
+
+def test_prepare_droid_manifest_keeps_task_out_of_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "droid"
+    episode = root / "AUTOLab" / "success" / "2023-10-21" / "episode"
+    videos = episode / "recordings" / "MP4"
+    videos.mkdir(parents=True)
+    (episode / "metadata_example.json").write_text(json.dumps({
+        "uuid": "AUTOLab+user+2023-10-21-19h-37m-47s",
+        "current_task": "Put the brick in the drawer.",
+        "wrist_cam_serial": "18026681",
+        "ext1_cam_serial": "22008760",
+        "ext2_cam_serial": "24400334",
+    }))
+    wrist = videos / "18026681.mp4"
+    wrist.write_bytes(b"video")
+    monkeypatch.setattr(
+        "video_annotation_pipeline.adapters._probe_video_duration",
+        lambda path: 4.184,
+    )
+    output = tmp_path / "sources.jsonl"
+
+    summary = prepare_droid_video_manifest(root, output, limit=1)
+
+    row = json.loads(output.read_text())
+    assert summary["prepared"] == 1
+    assert summary["task_hint_non_null"] == 0
+    assert row["source_clip_path"] == str(wrist)
+    assert row["duration_sec_reference"] == 4.184
+    assert row["camera_key"] == "wrist"
+    assert row["task_hint"] is None
+    assert row["reference_caption"] == "Put the brick in the drawer."
+    assert row["reference_policy"] == "held_out_from_visual_prompt"
+    assert row["narration_used"] is False
+
+
+def test_prepare_droid_manifest_enforces_duration_and_camera(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "droid"
+    episode = root / "lab" / "success" / "day" / "episode"
+    videos = episode / "recordings" / "MP4"
+    videos.mkdir(parents=True)
+    (episode / "metadata_example.json").write_text(json.dumps({
+        "uuid": "example", "ext1_cam_serial": "external",
+    }))
+    external = videos / "external.mp4"
+    external.write_bytes(b"video")
+    monkeypatch.setattr(
+        "video_annotation_pipeline.adapters._probe_video_duration",
+        lambda path: 2.999,
+    )
+    output = tmp_path / "sources.jsonl"
+
+    summary = prepare_droid_video_manifest(root, output, camera="ext1")
+
+    assert summary["prepared"] == 0
+    assert summary["skipped_duration"] == 1
+    assert output.read_text() == ""

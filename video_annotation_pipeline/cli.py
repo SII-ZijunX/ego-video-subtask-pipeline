@@ -12,6 +12,7 @@ from .commands import (
     annotate_command,
     evaluate_references_command,
     finalize_command,
+    prepare_droid_command,
     prepare_ego4d_command,
     prepare_lerobot_v2_command,
     prepare_lerobot_v3_command,
@@ -125,6 +126,26 @@ def prepare_lerobot_v2_cli(
 ) -> None:
     typer.echo(json.dumps(prepare_lerobot_v2_command(
         dataset_root, output, dataset, camera_key, offset, limit,
+        min_duration_sec, max_duration_sec, include_reference_caption,
+    ), ensure_ascii=False, indent=2))
+
+
+@app.command("prepare-droid")
+def prepare_droid_cli(
+    dataset_root: Path = typer.Option(..., "--dataset-root", exists=True, file_okay=False),
+    output: Path = typer.Option(..., "--output"),
+    dataset: str = typer.Option("droid-raw", "--dataset"),
+    camera: str = typer.Option("wrist", "--camera"),
+    offset: int = typer.Option(0, "--offset", min=0),
+    limit: int = typer.Option(0, "--limit", min=0),
+    min_duration_sec: float = typer.Option(3.0, "--min-duration-sec", min=0),
+    max_duration_sec: float = typer.Option(3600.0, "--max-duration-sec", min=0),
+    include_reference_caption: bool = typer.Option(
+        True, "--include-reference-caption/--no-reference-caption"
+    ),
+) -> None:
+    typer.echo(json.dumps(prepare_droid_command(
+        dataset_root, output, dataset, camera, offset, limit,
         min_duration_sec, max_duration_sec, include_reference_caption,
     ), ensure_ascii=False, indent=2))
 

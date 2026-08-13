@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 from typing import Any, Iterable
 
 
@@ -15,6 +17,142 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             count += 1
     return count
+
+
+def _probe_video_duration(path: Path) -> float:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return float(result.stdout.strip())
+
+
+def _iter_droid_metadata(root: Path) -> Iterable[Path]:
+    """Yield DROID trajectory metadata deterministically without indexing it all."""
+    for directory, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            if filename.startswith("metadata_") and filename.endswith(".json"):
+                yield Path(directory) / filename
+
+
+def prepare_droid_video_manifest(
+    dataset_root: Path | str,
+    output_manifest: Path | str,
+    *,
+    dataset: str = "droid-raw",
+    camera: str = "wrist",
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    include_reference_caption: bool = True,
+) -> dict[str, Any]:
+    """Build visual-only source rows from raw DROID trajectory directories.
+
+    Each trajectory contains synchronized wrist/ext1/ext2 MP4 files and a
+    metadata JSON. The dataset task is retained only as held-out reference
+    text; it is never copied to ``task_hint``.
+    """
+    camera_serial_key = {
+        "wrist": "wrist_cam_serial",
+        "ext1": "ext1_cam_serial",
+        "ext2": "ext2_cam_serial",
+    }.get(camera)
+    if camera_serial_key is None:
+        raise ValueError("camera must be one of: wrist, ext1, ext2")
+    if offset < 0 or limit < 0:
+        raise ValueError("offset and limit must be non-negative")
+    if min_duration_sec < 0 or max_duration_sec < min_duration_sec:
+        raise ValueError("invalid duration range")
+
+    root = Path(dataset_root).expanduser().resolve()
+    output = Path(output_manifest).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"DROID dataset root does not exist: {root}")
+
+    rows: list[dict[str, Any]] = []
+    scanned = eligible_seen = skipped_duration = missing_video = invalid_metadata = 0
+    probe_failures = 0
+    stop = offset + limit if limit else None
+    for metadata_path in _iter_droid_metadata(root):
+        scanned += 1
+        try:
+            metadata = json.loads(metadata_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            invalid_metadata += 1
+            continue
+        serial = str(metadata.get(camera_serial_key) or "").strip()
+        video_path = metadata_path.parent / "recordings" / "MP4" / f"{serial}.mp4"
+        if not serial or not video_path.is_file():
+            missing_video += 1
+            continue
+        try:
+            duration = round(_probe_video_duration(video_path), 3)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            probe_failures += 1
+            continue
+        if not min_duration_sec <= duration <= max_duration_sec:
+            skipped_duration += 1
+            continue
+        eligible_index = eligible_seen
+        eligible_seen += 1
+        if eligible_index < offset:
+            continue
+        if stop is not None and eligible_index >= stop:
+            break
+
+        video_uid = str(metadata.get("uuid") or metadata_path.parent.name)
+        clip_uid = "".join(
+            character if character.isalnum() or character in "-_" else "-"
+            for character in video_uid
+        ).strip("-")
+        reference_caption = (
+            str(metadata.get("current_task") or "").strip() or None
+            if include_reference_caption else None
+        )
+        rows.append({
+            "dataset": dataset,
+            "clip_uid": f"{dataset}-{clip_uid}",
+            "video_uid": video_uid,
+            "source_clip_path": str(video_path),
+            "duration_sec_reference": duration,
+            "camera_key": camera,
+            "task_hint": None,
+            "reference_caption": reference_caption,
+            "reference_policy": "held_out_from_visual_prompt",
+            "label_source": "qwen_visual_only",
+            "narration_used": False,
+        })
+        if limit and len(rows) >= limit:
+            break
+
+    _write_jsonl(output, rows)
+    summary = {
+        "dataset": dataset,
+        "dataset_root": str(root),
+        "camera": camera,
+        "manifest": str(output),
+        "metadata_scanned": scanned,
+        "eligible_seen": eligible_seen,
+        "prepared": len(rows),
+        "skipped_duration": skipped_duration,
+        "missing_video": missing_video,
+        "invalid_metadata": invalid_metadata,
+        "probe_failures": probe_failures,
+        "task_hint_non_null": sum(row["task_hint"] is not None for row in rows),
+        "reference_caption_rows": sum(bool(row["reference_caption"]) for row in rows),
+        "narration_used": False,
+    }
+    output.with_suffix(".summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
+    )
+    return summary
 
 
 def prepare_lerobot_v3_video_manifest(

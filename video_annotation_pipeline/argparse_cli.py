@@ -16,6 +16,7 @@ from .commands import (
     annotate_command,
     evaluate_references_command,
     finalize_command,
+    prepare_droid_command,
     prepare_ego4d_command,
     prepare_lerobot_v2_command,
     prepare_lerobot_v3_command,
@@ -76,6 +77,16 @@ def run() -> None:
     lerobot_parser.add_argument("--min-duration-sec", type=float, default=3.0)
     lerobot_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
     lerobot_parser.add_argument("--no-reference-caption", action="store_true")
+    droid_parser = subparsers.add_parser("prepare-droid")
+    droid_parser.add_argument("--dataset-root", required=True, type=Path)
+    droid_parser.add_argument("--output", required=True, type=Path)
+    droid_parser.add_argument("--dataset", default="droid-raw")
+    droid_parser.add_argument("--camera", choices=["wrist", "ext1", "ext2"], default="wrist")
+    droid_parser.add_argument("--offset", type=int, default=0)
+    droid_parser.add_argument("--limit", type=int, default=0)
+    droid_parser.add_argument("--min-duration-sec", type=float, default=3.0)
+    droid_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
+    droid_parser.add_argument("--no-reference-caption", action="store_true")
     finalize_parser = subparsers.add_parser("finalize")
     finalize_parser.add_argument("--annotations", required=True, type=Path)
     finalize_parser.add_argument("--validation", required=True, type=Path)
@@ -113,6 +124,12 @@ def run() -> None:
     elif args.command == "prepare-lerobot-v3":
         result = prepare_lerobot_v3_command(
             args.dataset_root, args.output, args.dataset, args.camera_key,
+            args.offset, args.limit, args.min_duration_sec, args.max_duration_sec,
+            not args.no_reference_caption,
+        )
+    elif args.command == "prepare-droid":
+        result = prepare_droid_command(
+            args.dataset_root, args.output, args.dataset, args.camera,
             args.offset, args.limit, args.min_duration_sec, args.max_duration_sec,
             not args.no_reference_caption,
         )

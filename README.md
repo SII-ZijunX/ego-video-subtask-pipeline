@@ -175,6 +175,22 @@ ego-video-pipeline prepare-lerobot-v2 \
 
 v2 adapter 同样把 `tasks` 仅保存为 held-out `reference_caption`，不写入 `task_hint`。
 
+DROID raw 的每条 trajectory 自带 wrist/ext1/ext2 三路 MP4。可以直接选择一路生成
+episode manifest；`current_task` 只作为 held-out reference：
+
+```bash
+ego-video-pipeline prepare-droid \
+  --dataset-root /data/droid-raw \
+  --dataset droid-raw \
+  --camera wrist \
+  --output runs/droid/sources.jsonl \
+  --limit 100 \
+  --min-duration-sec 3
+```
+
+adapter 会用 `ffprobe` 检查实际视频时长，缺失/损坏或低于 3 秒的 trajectory 不会进入
+manifest；`current_task` 不会写入 `task_hint`。
+
 然后运行：
 
 ```bash

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from .adapters import (
+    prepare_droid_video_manifest,
     prepare_ego4d_dataset,
     prepare_lerobot_v2_video_manifest,
     prepare_lerobot_v3_video_manifest,
@@ -161,6 +162,25 @@ def prepare_lerobot_v2_command(
 ) -> dict:
     return prepare_lerobot_v2_video_manifest(
         dataset_root, output, dataset=dataset, camera_key=camera_key,
+        offset=offset, limit=limit, min_duration_sec=min_duration_sec,
+        max_duration_sec=max_duration_sec,
+        include_reference_caption=include_reference_caption,
+    )
+
+
+def prepare_droid_command(
+    dataset_root: Path,
+    output: Path,
+    dataset: str = "droid-raw",
+    camera: str = "wrist",
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    include_reference_caption: bool = True,
+) -> dict:
+    return prepare_droid_video_manifest(
+        dataset_root, output, dataset=dataset, camera=camera,
         offset=offset, limit=limit, min_duration_sec=min_duration_sec,
         max_duration_sec=max_duration_sec,
         include_reference_caption=include_reference_caption,
