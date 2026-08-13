@@ -117,6 +117,58 @@ def test_export_analysis_window_adds_episode_offset(tmp_path, monkeypatch) -> No
     assert metadata["task_hint"] is None
 
 
+def test_prepare_cleanup_removes_only_stale_generated_episodes(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    stale_media = run / "analysis_clips" / "old-clip" / "old-window.mp4"
+    stale_media.parent.mkdir(parents=True)
+    stale_media.write_bytes(b"old")
+    stale_episode = run / "dataset" / "old-window"
+    stale_episode.mkdir(parents=True)
+    (stale_episode / "metadata.json").write_text(json.dumps({
+        "episode_id": "old-window",
+        "source": "droid-raw_long_window",
+        "label_source": "qwen_visual_only",
+        "cameras": [{"path": str(stale_media)}],
+    }))
+    active_episode = run / "dataset" / "active-window"
+    active_episode.mkdir(parents=True)
+    (active_episode / "metadata.json").write_text(json.dumps({
+        "episode_id": "active-window",
+        "source": "droid-raw_long_window",
+        "label_source": "qwen_visual_only",
+        "cameras": [],
+    }))
+    unmanaged = run / "dataset" / "manual"
+    unmanaged.mkdir(parents=True)
+    (unmanaged / "metadata.json").write_text(json.dumps({
+        "episode_id": "manual", "source": "manual",
+    }))
+    qwen = run / "qwen"
+    (qwen / "episodes" / "old-window").mkdir(parents=True)
+    (qwen / "episodes" / "active-window").mkdir(parents=True)
+    qwen.mkdir(exist_ok=True)
+    (qwen / "annotations.jsonl").write_text(
+        json.dumps({"episode_id": "old-window"}) + "\n"
+        + json.dumps({"episode_id": "active-window"}) + "\n"
+    )
+
+    result = pilot.prune_stale_prepared_episodes(run, {"active-window"})
+
+    assert result == {
+        "removed_stale_episodes": 1,
+        "removed_stale_analysis_clips": 1,
+        "removed_stale_qwen_episode_dirs": 1,
+    }
+    assert not stale_episode.exists()
+    assert not stale_media.exists()
+    assert active_episode.is_dir()
+    assert unmanaged.is_dir()
+    assert (qwen / "episodes" / "active-window").is_dir()
+    assert [row["episode_id"] for row in pilot.read_jsonl(qwen / "annotations.jsonl")] == [
+        "active-window"
+    ]
+
+
 def test_annotation_candidates_map_local_to_source_time() -> None:
     sources = [{
         "clip_uid": "clip", "video_uid": "video", "source_clip_path": "/raw.mp4",
