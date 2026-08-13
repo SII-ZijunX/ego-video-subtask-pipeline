@@ -32,10 +32,14 @@ def _probe_video_duration(path: Path) -> float:
     return float(result.stdout.strip())
 
 
-def _iter_droid_metadata(root: Path) -> Iterable[Path]:
+def _iter_droid_metadata(root: Path, outcome: str) -> Iterable[Path]:
     """Yield DROID trajectory metadata deterministically without indexing it all."""
     for directory, dirnames, filenames in os.walk(root):
         dirnames.sort()
+        if outcome == "success":
+            dirnames[:] = [name for name in dirnames if name != "failure"]
+        elif outcome == "failure":
+            dirnames[:] = [name for name in dirnames if name != "success"]
         for filename in sorted(filenames):
             if filename.startswith("metadata_") and filename.endswith(".json"):
                 yield Path(directory) / filename
@@ -84,7 +88,7 @@ def prepare_droid_video_manifest(
     invalid_metadata = 0
     probe_failures = 0
     stop = offset + limit if limit else None
-    for metadata_path in _iter_droid_metadata(root):
+    for metadata_path in _iter_droid_metadata(root, outcome):
         scanned += 1
         try:
             metadata = json.loads(metadata_path.read_text())
@@ -131,6 +135,7 @@ def prepare_droid_video_manifest(
             "source_clip_path": str(video_path),
             "duration_sec_reference": duration,
             "camera_key": camera,
+            "trajectory_success": bool(success),
             "task_hint": None,
             "reference_caption": reference_caption,
             "reference_policy": "held_out_from_visual_prompt",

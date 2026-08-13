@@ -164,6 +164,8 @@ def test_prepare_droid_manifest_defaults_to_success_only(
 
     row = json.loads(output.read_text())
     assert summary["outcome"] == "success"
-    assert summary["skipped_outcome"] == 1
+    assert summary["metadata_scanned"] == 1
+    assert summary["skipped_outcome"] == 0
     assert summary["prepared"] == 1
     assert row["video_uid"] == "success"
+    assert row["trajectory_success"] is True
