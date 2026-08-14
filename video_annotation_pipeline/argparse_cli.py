@@ -20,6 +20,7 @@ from .commands import (
     prepare_ego4d_command,
     prepare_lerobot_v2_command,
     prepare_lerobot_v3_command,
+    prepare_robomind2_command,
     stats_command,
     validate_command,
     visualize_command,
@@ -88,6 +89,19 @@ def run() -> None:
     droid_parser.add_argument("--min-duration-sec", type=float, default=3.0)
     droid_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
     droid_parser.add_argument("--no-reference-caption", action="store_true")
+    robomind2_parser = subparsers.add_parser("prepare-robomind2")
+    robomind2_parser.add_argument("--dataset-root", required=True, type=Path)
+    robomind2_parser.add_argument("--output", required=True, type=Path)
+    robomind2_parser.add_argument("--video-output-dir", required=True, type=Path)
+    robomind2_parser.add_argument("--dataset", default="robomind2")
+    robomind2_parser.add_argument("--camera", default="camera_wrist_left")
+    robomind2_parser.add_argument("--offset", type=int, default=0)
+    robomind2_parser.add_argument("--limit", type=int, default=0)
+    robomind2_parser.add_argument("--min-duration-sec", type=float, default=3.0)
+    robomind2_parser.add_argument("--max-duration-sec", type=float, default=3600.0)
+    robomind2_parser.add_argument("--fallback-fps", type=float, default=10.0)
+    robomind2_parser.add_argument("--no-reference-caption", action="store_true")
+    robomind2_parser.add_argument("--overwrite", action="store_true")
     finalize_parser = subparsers.add_parser("finalize")
     finalize_parser.add_argument("--annotations", required=True, type=Path)
     finalize_parser.add_argument("--validation", required=True, type=Path)
@@ -133,6 +147,13 @@ def run() -> None:
             args.dataset_root, args.output, args.dataset, args.camera, args.outcome,
             args.offset, args.limit, args.min_duration_sec, args.max_duration_sec,
             not args.no_reference_caption,
+        )
+    elif args.command == "prepare-robomind2":
+        result = prepare_robomind2_command(
+            args.dataset_root, args.output, args.video_output_dir,
+            args.dataset, args.camera, args.offset, args.limit,
+            args.min_duration_sec, args.max_duration_sec, args.fallback_fps,
+            not args.no_reference_caption, args.overwrite,
         )
     elif args.command == "finalize":
         result = finalize_command(

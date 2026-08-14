@@ -170,6 +170,244 @@ def prepare_droid_video_manifest(
     return summary
 
 
+def _robomind2_duration_and_fps(
+    timestamps: Any, frame_count: int, fallback_fps: float
+) -> tuple[float, float]:
+    if frame_count <= 0 or fallback_fps <= 0:
+        raise ValueError("frame_count and fallback_fps must be positive")
+    values = [float(value) for value in timestamps]
+    if len(values) >= 2 and values[-1] > values[0]:
+        elapsed = values[-1] - values[0]
+        # Some exports use nanoseconds, while the mounted RoboMIND2 sample
+        # stores coarse Unix seconds. Normalize only clearly sub-second units.
+        magnitude = max(abs(values[0]), abs(values[-1]))
+        if magnitude > 1e17:
+            elapsed /= 1e9
+        elif magnitude > 1e14:
+            elapsed /= 1e6
+        elif magnitude > 1e11:
+            elapsed /= 1e3
+        if elapsed > 0:
+            fps = (frame_count - 1) / elapsed
+            if 0.5 <= fps <= 240.0:
+                return round(frame_count / fps, 6), round(fps, 6)
+    return round(frame_count / fallback_fps, 6), float(fallback_fps)
+
+
+def _export_robomind2_camera_video(
+    frames: Any, output_path: Path, fps: float, overwrite: bool
+) -> tuple[bool, str | None]:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as exc:  # pragma: no cover - base deps normally provide these
+        raise RuntimeError("RoboMIND2 export requires opencv-python and numpy") from exc
+    if output_path.is_file() and not overwrite:
+        return True, None
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(output_path.stem + ".tmp.mp4")
+    writer = None
+    try:
+        for index in range(len(frames)):
+            encoded = np.asarray(frames[index], dtype=np.uint8)
+            image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+            if image is None:
+                return False, f"frame {index} failed image decode"
+            if writer is None:
+                height, width = image.shape[:2]
+                writer = cv2.VideoWriter(
+                    str(temporary), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+                )
+                if not writer.isOpened():
+                    return False, "cv2 VideoWriter failed to open"
+            writer.write(image)
+        if writer is None:
+            return False, "camera dataset has no frames"
+    except Exception as exc:
+        return False, str(exc)
+    finally:
+        if writer is not None:
+            writer.release()
+    if not temporary.is_file() or temporary.stat().st_size <= 0:
+        return False, "video writer produced no output"
+    temporary.replace(output_path)
+    return True, None
+
+
+def _iter_robomind2_hdf5(
+    root: Path, embodiment: str | None = None, task: str | None = None
+) -> Iterable[Path]:
+    """Stream deterministic RoboMIND2 trajectories without a global glob."""
+    embodiment_dirs = (
+        [root / embodiment] if embodiment else sorted(path for path in root.iterdir() if path.is_dir())
+    )
+    for embodiment_dir in embodiment_dirs:
+        if not embodiment_dir.is_dir():
+            continue
+        task_dirs = (
+            [embodiment_dir / task]
+            if task else sorted(path for path in embodiment_dir.iterdir() if path.is_dir())
+        )
+        for task_dir in task_dirs:
+            if not task_dir.is_dir():
+                continue
+            episodes_dir = task_dir / "success_episodes"
+            if not episodes_dir.is_dir():
+                continue
+            for episode_dir in sorted(path for path in episodes_dir.iterdir() if path.is_dir()):
+                hdf5_path = episode_dir / "data" / "trajectory.hdf5"
+                if hdf5_path.is_file():
+                    yield hdf5_path
+
+
+def prepare_robomind2_hdf5_manifest(
+    dataset_root: Path | str,
+    output_manifest: Path | str,
+    video_output_dir: Path | str,
+    *,
+    dataset: str = "robomind2",
+    camera: str = "camera_wrist_left",
+    embodiment: str | None = None,
+    task: str | None = None,
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    fallback_fps: float = 10.0,
+    include_reference_caption: bool = True,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Decode RoboMIND2 HDF5 JPEG frames into episode MP4 source rows."""
+    try:
+        import h5py
+    except ImportError as exc:  # pragma: no cover - optional adapter dependency
+        raise RuntimeError(
+            "RoboMIND2 preparation requires h5py; install the 'robomind2' extra"
+        ) from exc
+    if offset < 0 or limit < 0:
+        raise ValueError("offset and limit must be non-negative")
+    if min_duration_sec < 0 or max_duration_sec < min_duration_sec:
+        raise ValueError("invalid duration range")
+    if fallback_fps <= 0:
+        raise ValueError("fallback_fps must be positive")
+
+    root = Path(dataset_root).expanduser().resolve()
+    output = Path(output_manifest).expanduser().resolve()
+    video_dir = Path(video_output_dir).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"RoboMIND2 dataset root does not exist: {root}")
+    rows: list[dict[str, Any]] = []
+    hdf5_found = 0
+    scanned = eligible_seen = empty_trajectory = missing_camera = skipped_duration = 0
+    export_failures = invalid_hdf5 = 0
+    stop = offset + limit if limit else None
+    for hdf5_path in _iter_robomind2_hdf5(root, embodiment, task):
+        hdf5_found += 1
+        scanned += 1
+        try:
+            handle = h5py.File(hdf5_path, "r")
+        except OSError:
+            invalid_hdf5 += 1
+            continue
+        with handle:
+            frame_key = f"camera_observations/color_images/{camera}"
+            if frame_key not in handle:
+                missing_camera += 1
+                continue
+            frames = handle[frame_key]
+            frame_count = len(frames)
+            if frame_count <= 0:
+                empty_trajectory += 1
+                continue
+            timestamps = (
+                handle["camera_observations/timestamp"][:]
+                if "camera_observations/timestamp" in handle else []
+            )
+            duration, fps = _robomind2_duration_and_fps(
+                timestamps, frame_count, fallback_fps
+            )
+            if not min_duration_sec <= duration <= max_duration_sec:
+                skipped_duration += 1
+                continue
+            eligible_index = eligible_seen
+            eligible_seen += 1
+            if eligible_index < offset:
+                continue
+            if stop is not None and eligible_index >= stop:
+                break
+
+            relative = hdf5_path.relative_to(root)
+            embodiment, task, _, episode = relative.parts[:4]
+            clip_uid = "-".join(
+                safe for safe in (
+                    "".join(c if c.isalnum() or c in "-_" else "-" for c in value).strip("-")
+                    for value in (dataset, embodiment, task, episode)
+                ) if safe
+            )
+            video_path = video_dir / embodiment / task / f"{episode}__{camera}.mp4"
+            export_ok, export_error = _export_robomind2_camera_video(
+                frames, video_path, fps, overwrite
+            )
+            if not export_ok:
+                export_failures += 1
+                continue
+            actual_duration = _probe_video_duration(video_path)
+            if abs(actual_duration - duration) > max(0.5, 2.0 / fps):
+                export_failures += 1
+                continue
+            metadata = handle.get("metadata")
+            instruction = ""
+            if metadata is not None:
+                instruction = str(metadata.attrs.get("language_instruction") or "").strip()
+            rows.append({
+                "dataset": dataset,
+                "clip_uid": clip_uid,
+                "video_uid": f"{embodiment}/{task}/{episode}",
+                "source_clip_path": str(video_path),
+                "duration_sec_reference": round(actual_duration, 3),
+                "camera_key": camera,
+                "source_hdf5_path": str(hdf5_path),
+                "embodiment": embodiment,
+                "source_task": task,
+                "frame_count": frame_count,
+                "inferred_fps": fps,
+                "task_hint": None,
+                "reference_caption": instruction if include_reference_caption and instruction else None,
+                "reference_policy": "held_out_from_visual_prompt",
+                "label_source": "qwen_visual_only",
+                "narration_used": False,
+            })
+            if limit and len(rows) >= limit:
+                break
+
+    _write_jsonl(output, rows)
+    summary = {
+        "dataset": dataset,
+        "dataset_root": str(root),
+        "camera": camera,
+        "embodiment_filter": embodiment,
+        "task_filter": task,
+        "manifest": str(output),
+        "video_output_dir": str(video_dir),
+        "hdf5_found": hdf5_found,
+        "hdf5_scanned": scanned,
+        "eligible_seen": eligible_seen,
+        "prepared": len(rows),
+        "empty_trajectory": empty_trajectory,
+        "missing_camera": missing_camera,
+        "skipped_duration": skipped_duration,
+        "invalid_hdf5": invalid_hdf5,
+        "export_failures": export_failures,
+        "task_hint_non_null": sum(row["task_hint"] is not None for row in rows),
+        "reference_caption_rows": sum(bool(row["reference_caption"]) for row in rows),
+        "narration_used": False,
+    }
+    output.with_suffix(".summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
+    )
+    return summary
+
+
 def prepare_lerobot_v3_video_manifest(
     dataset_root: Path | str,
     output_manifest: Path | str,

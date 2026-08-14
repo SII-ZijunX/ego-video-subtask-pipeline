@@ -10,6 +10,7 @@ from .adapters import (
     prepare_ego4d_dataset,
     prepare_lerobot_v2_video_manifest,
     prepare_lerobot_v3_video_manifest,
+    prepare_robomind2_hdf5_manifest,
 )
 from .batch import annotate_batch, discover_episodes, read_jsonl
 from .config import load_config
@@ -185,6 +186,31 @@ def prepare_droid_command(
         offset=offset, limit=limit, min_duration_sec=min_duration_sec,
         max_duration_sec=max_duration_sec,
         include_reference_caption=include_reference_caption,
+    )
+
+
+def prepare_robomind2_command(
+    dataset_root: Path,
+    output: Path,
+    video_output_dir: Path,
+    dataset: str = "robomind2",
+    camera: str = "camera_wrist_left",
+    embodiment: str | None = None,
+    task: str | None = None,
+    offset: int = 0,
+    limit: int = 0,
+    min_duration_sec: float = 3.0,
+    max_duration_sec: float = 3600.0,
+    fallback_fps: float = 10.0,
+    include_reference_caption: bool = True,
+    overwrite: bool = False,
+) -> dict:
+    return prepare_robomind2_hdf5_manifest(
+        dataset_root, output, video_output_dir, dataset=dataset, camera=camera,
+        embodiment=embodiment, task=task,
+        offset=offset, limit=limit, min_duration_sec=min_duration_sec,
+        max_duration_sec=max_duration_sec, fallback_fps=fallback_fps,
+        include_reference_caption=include_reference_caption, overwrite=overwrite,
     )
 
 
